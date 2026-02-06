@@ -37,8 +37,9 @@ Ranvire is primarily for:
 - People comfortable reading code and making their own modifications
 - Users who value stability over novelty
 
-It is not positioned as a general-purpose community hub.
+It is not positioned as a general-purpose community hub. This is a personal maintenance fork, kept public for practical reasons.
 
 ---
 
-This is a personal maintenance fork, kept public for practical reasons.
+The Ranvire organization logo is [_sand castle_](https://thenounproject.com/icon/sand-castle-4361630/) by [Asep Yopie Hardi Noer](https://thenounproject.com/creator/sepihan/) from [Noun Project](https://thenounproject.com/browse/icons/term/sand-castle/) (CC BY 3.0)
+
