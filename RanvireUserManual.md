@@ -6,12 +6,12 @@
 
 This is the repository a user clones and runs. It contains:
 
-* the executable wrapper script `./ranvier` (invoked by `npm start`) ([GitHub][1])
-* the primary configuration file `ranvier.json` (or optional `ranvier.conf.js`) ([GitHub][2])
-* a `bundles/` directory that holds gameplay/content bundles (often installed as git submodules by the provided tooling) ([GitHub][3])
-* a `data/` directory used as the on-disk root for runtime data (accounts/players in the default config) ([GitHub][2])
+* the executable wrapper script `./ranvier` (invoked by `npm start` in `package.json`)
+* the primary configuration file `ranvier.json` (or optional `ranvier.conf.js`, if present)
+* a `bundles/` directory that serves as the bundle root; the provided `util/*` scripts manage bundles as git submodules in this directory
+* a `data/` directory used as the on-disk root for runtime data (accounts/players are configured under `data/account` and `data/player` by default)
 
-`ranviermud` depends on the engine and datasource packages via GitHub dependencies, not local source inclusion. ([GitHub][1])
+`ranviermud` depends on external packages via GitHub dependencies in `package.json`, including `ranvier`, `ranvier-datasource-file`, and `ranvier-telnet`.
 
 ### 2) `Ranvire/core` — the engine library consumed by `ranviermud`
 
@@ -29,15 +29,17 @@ In the default `ranviermud` configuration (`ranvier.json`), these datasources ar
 
 ### What Ranvire is
 
-Ranvire, as embodied by these three repositories, is a Node.js-based game server composed of:
+Ranvire is a Node.js-based game server composed of:
 
 * a **thin runnable wrapper** (`ranviermud`) that:
 
-  * loads configuration,
-  * constructs the global runtime state object,
-  * invokes the engine’s registries and bundle loader,
-  * triggers server startup events,
-  * and schedules tick loops. ([GitHub][2])
+  * loads configuration (`ranvier.conf.js` if present, else `ranvier.json`)
+  * constructs a global runtime state object (`GameState`) with managers/factories/registries from the `ranvier` dependency
+  * wires data sources and entity loaders from `ranvier.json`
+  * instantiates a `BundleManager` and calls `loadBundles()`
+  * attaches server events and (when not in test mode) calls `GameServer.startup(...)`
+  * schedules tick loops for entities and players ([Github][2])
+
 * a **core engine library** (`core`, package `ranvier`) that provides:
 
   * the object model (managers/factories),
@@ -48,19 +50,19 @@ Ranvire, as embodied by these three repositories, is a Node.js-based game server
   * and an event-emitting “server” surface that bundles can attach to. ([GitHub][4])
 * **storage backends** (e.g., `datasource-file`) that implement CRUD-style access to entity records, and are selected/configured entirely via `ranvier.json`. ([GitHub][6])
 
-### What Ranvire is not (as evidenced by the code)
+### NB
 
-* The core engine is **not** the process entry point: `ranviermud` owns the “boot wrapper” (`./ranvier`) and calls into the engine. ([GitHub][2])
+* The process entry point for `ranviermud` is `./ranvier` (not the `ranvier` dependency itself). The wrapper loads the dependency via `require('ranvier')`.
 * A datasource is **not** the engine’s persistence layer; it is a pluggable adapter selected by configuration and invoked through `EntityLoader`. ([GitHub][7])
 
-### Architectural separation of concerns (visible in the code)
+### Architectural separation of concerns
 
 The separation is explicit in how the wrapper builds the process:
 
-* **Configuration**: loaded by the wrapper and made globally accessible through the engine’s `Config` static accessor. ([GitHub][2])
-* **Runtime state (“GameState”)**: constructed as a plain object by `ranviermud/ranvier`, populated with engine-provided managers and registries. ([GitHub][2])
-* **Content and features**: loaded from “bundles” by `BundleManager`, based on the enabled bundle list in config. ([GitHub][8])
-* **Persistence**: defined by `dataSources` + `entityLoaders` in `ranvier.json`, with file-backed implementations supplied by `ranvier-datasource-file`. ([GitHub][6])
+* **Configuration**: loaded by the wrapper via `Ranvier.Config.load(...)` and read via `Config.get(...)`.
+* **Runtime state (“GameState”)**: constructed as a plain object in `ranvier`, populated with managers/factories/registries from `ranvier`.
+* **Content and features**: the wrapper instantiates `Ranvier.BundleManager` and calls `loadBundles()`; bundle loading behavior is defined in the `ranvier` dependency.
+* **Persistence wiring**: `ranvier.json` defines `dataSources` and `entityLoaders`, which the wrapper loads via `DataSourceRegistry` and `EntityLoaderRegistry`.
 
 ---
 
@@ -70,22 +72,22 @@ The separation is explicit in how the wrapper builds the process:
 
 ### What it owns
 
-* **Process entry and boot**: `./ranvier` performs Node version gating, config selection, logger setup, global state construction, registry initialization, bundle loading, and server startup/ticks. ([GitHub][2])
-* **Project-level configuration**: `ranvier.json` defines enabled bundles, datasource registrations, and entity loader wiring (plus other settings like `startingRoom`, name length constraints, etc.). ([GitHub][6])
-* **Bundle management tooling**: scripts under `util/` manage bundles as git submodules and update `ranvier.json`. ([GitHub][9])
+* **Process entry and boot**: `./ranvier` performs Node version gating, config selection, logger setup, global state construction, registry initialization, bundle loading, and server startup/ticks.
+* **Project-level configuration**: `ranvier.json` defines enabled bundles, datasource registrations, and entity loader wiring (plus other settings like `startingRoom`, name length constraints, etc.).
+* **Bundle management tooling**: scripts under `util/` manage bundles as git submodules and update `ranvier.json`.
 
 ### What it deliberately does not own
 
-* It does not implement engine subsystems (those come from `ranvier`). ([GitHub][1])
-* It does not implement persistence backends (those come from packages like `ranvier-datasource-file`). ([GitHub][1])
+* Engine subsystem implementations live in the external dependency `ranvier`.
+* Datasource implementations live in external dependencies such as `ranvier-datasource-file`.
 
 ### How it depends on the others
 
 In `package.json`, `ranviermud` depends on:
 
-* `"ranvier": "github:Ranvire/core"` (engine)
-* `"ranvier-datasource-file": "github:Ranvire/datasource-file"` (file-backed datasources)
-* `"ranvier-telnet": "github:Ranvire/ranvier-telnet"` (telnet transport implementation, consumed through bundle/server-event conventions rather than direct invocation in the wrapper) ([GitHub][1])
+* `ranvier` (engine)
+* `ranvier-datasource-file` (datasources)
+* `ranvier-telnet` (telnet transport implementation)
 
 ## 2.2 `Ranvire/core`
 
@@ -124,7 +126,7 @@ In `package.json`, `ranviermud` depends on:
 
 ## 3. Runtime architecture
 
-This section follows the *actual boot path* in `ranviermud/ranvier`.
+This section follows the boot path in `Ranvire/ranvier`.
 
 ### 3.1 Process entry and Node version gating
 
@@ -134,7 +136,7 @@ At startup, `./ranvier`:
 
 * reads `./package.json`
 * checks `process.version` against `pkg.engines.node` via `semver.satisfies`
-* throws if the Node runtime does not meet the declared requirement (in this fork, `>=22`). ([GitHub][2])
+* throws if the Node runtime does not meet the declared requirement (currently `>=22`). ([GitHub][2])
 
 ### 3.2 Configuration loading
 
@@ -144,12 +146,7 @@ The wrapper chooses config in this order:
 2. Else if `./ranvier.json` exists, it loads that.
 3. Else it prints an error and exits. ([GitHub][2])
 
-In both cases, the wrapper calls `Ranvier.Config.load(require(...))`. `Config.load` is a simple setter that stores the provided object in a module-level cache. ([GitHub][2])
-
-This has two important implications:
-
-* there is no deep-merge logic in `Config`; what you `load` is what you later `get`. ([GitHub][10])
-* any defaults are supplied by callers via `Config.get(key, fallback)` patterns (the wrapper does this for the CLI port default). ([GitHub][2])
+In both cases, the wrapper calls `Ranvier.Config.load(require(...))` and later reads values via `Config.get(...)`.
 
 ### 3.3 Logging setup
 
@@ -157,7 +154,7 @@ The wrapper configures:
 
 * console logging level (based on commander’s `verbose` option vs environment/config)
 * optional file logging if `Config.get('logfile')` is set
-* optional “pretty errors” if the `--prettyErrors` CLI flag is set. ([GitHub][2])
+* optional “pretty errors” if the `--prettyErrors` CLI flag is set
 
 The engine `Logger` is a Winston wrapper; it configures a Console transport with timestamps, and can add/remove a File transport via `Logger.setFileLogging(path)` / `Logger.deactivateFileLogging()`. ([GitHub][11])
 
@@ -168,10 +165,14 @@ The wrapper constructs `GameState` as a plain object populated with engine subsy
 * `AccountManager`, `PlayerManager`
 * `AreaManager`, `RoomManager`, `MobManager`, `ItemManager`
 * factories like `AreaFactory`, `RoomFactory`, `MobFactory`, `ItemFactory`
-* event managers, command manager, help manager
+* `AttributeFactory`, `CommandManager`, `HelpManager`, `ChannelManager`
+* behavior managers for areas, rooms, mobs, items
+* `QuestFactory`, `QuestGoalManager`, `QuestRewardManager`
+* `SkillManager`, `SpellManager`
 * `EntityLoaderRegistry`, `DataSourceRegistry`
-* `GameServer`
-* and the loaded `Config` reference. ([GitHub][2])
+* `GameServer`, `ServerEventManager`
+* `DataLoader` (`Ranvier.Data`)
+* `Config`
 
 This object is then passed into `BundleManager` (see below) so bundles can register features against shared runtime subsystems. ([GitHub][2])
 
@@ -183,35 +184,20 @@ Before loading config, the wrapper sets the engine’s data root:
 Ranvier.Data.setDataPath(__dirname + '/data/');
 ```
 
-This establishes `ranviermud/data/` as the runtime data directory from the engine’s perspective. ([GitHub][2])
+This establishes `ranviermud/data/` as the runtime data directory from the perspectives of the engine and the wrapper. ([GitHub][2])
 
 ### 3.6 DataSourceRegistry and EntityLoaderRegistry wiring
 
 After `GameState` is constructed, the wrapper:
 
-1. Loads datasources from `Config.get('dataSources')` using the engine’s `DataSourceRegistry`:
-
-   ```js
-   GameState.DataSourceRegistry.load(require, __dirname, Config.get('dataSources'));
-   ```
-2. Loads entity loaders from `Config.get('entityLoaders')` using `EntityLoaderRegistry`:
-
-   ```js
-   GameState.EntityLoaderRegistry.load(GameState.DataSourceRegistry, Config.get('entityLoaders'));
-   ```
-3. Sets loaders onto the account and player managers:
-
-   ````js
-   GameState.AccountManager.setLoader(GameState.EntityLoaderRegistry.get('accounts'));
-   GameState.PlayerManager.setLoader(GameState.EntityLoaderRegistry.get('players'));
-   ``` :contentReference[oaicite:49]{index=49}  
-   ````
-
+1. Loads datasources from `Config.get('dataSources')` using `DataSourceRegistry`.
+2. Loads entity loaders from `Config.get('entityLoaders')` using `EntityLoaderRegistry`.
+3. Sets loaders onto the account and player managers (`accounts` and `players`).
 The wrapper is the authoritative “wiring” layer here: it decides which loaders back which subsystems.
 
 ### 3.7 BundleManager boot sequence
 
-The wrapper creates:
+The wrapper creates a `BundleManager` with the bundles path and `GameState`, then calls `loadBundles()`.
 
 ```js
 const BundleManager = new Ranvier.BundleManager(__dirname + '/bundles/', GameState);
@@ -243,9 +229,9 @@ The feature paths and their load order are hard-coded in `BundleManager.loadBund
 
 This is one of the most important “architectural contracts” in Ranvire: bundle authors place scripts in these conventional locations to participate in boot.
 
-### 3.8 Server startup is event-driven
+### 3.8 Server startup
 
-The wrapper attaches server events and starts the server:
+The wrapper attaches server events and starts the server (when not in test mode):
 
 * `GameState.ServerEventManager.attach(GameState.GameServer);`
 * `GameState.GameServer.startup(commander);` ([GitHub][2])
@@ -276,8 +262,8 @@ This is the “heartbeat” that drives time-based mechanics; the wrapper is res
 
 The wrapper supports a test mode via environment variables:
 
-* `RANVIER_WRAPPER_TEST === '1'` enables “do not start server” behavior
-* `RANVIER_WRAPPER_TEST_OUTPUT` can be used to write a JSON payload about boot/config selection. ([GitHub][2])
+* `RANVIER_WRAPPER_TEST === '1'` prevents server startup and tick scheduling.
+* `RANVIER_WRAPPER_TEST_OUTPUT` writes a JSON payload with fields including `configSource`, `dataPath`, `bundlesPath`, `booted`, `configPort`, and `error`. ([Github][2])
 
 ---
 
@@ -288,9 +274,9 @@ This section distinguishes between:
 * **script-loaded features** (commands, server-events, etc.) loaded from bundle filesystem paths by `BundleManager`, and
 * **datasource-backed entity records** (areas, rooms, NPCs, items, quests, accounts, players, help entries) loaded through configured entity loaders.
 
-### 4.1 What an “entity” means here
-
 In Ranvire’s runtime wiring, an “entity” (in the persistence/config sense) is a record or collection of records addressed via an `EntityLoader` that wraps a datasource instance. ([GitHub][7])
+
+### 4.1 Entity loader categories (as configured)
 
 The default `ranvier.json` defines entity loader categories:
 
@@ -301,9 +287,9 @@ The default `ranvier.json` defines entity loader categories:
 * `items`
 * `rooms`
 * `quests`
-* `help` ([GitHub][6])
+* `help`([GitHub][6])
 
-These names are configuration keys, and (for at least accounts/players) are explicitly wired to managers in the wrapper via `EntityLoaderRegistry.get('accounts')` and `get('players')`. ([GitHub][2])
+These names are configuration keys.  The wrapper explicitly wires the `accounts` and `players` loaders into their managers in the wrapper via `EntityLoaderRegistry.get('accounts')` and `get('players')`. ([GitHub][2])
 
 ### 4.2 EntityLoader: the executable interface
 
@@ -326,7 +312,7 @@ In `ranvier.json`:
 * `dataSources` is a map of short names → `{ require: "…" }` strings. ([GitHub][6])
 * `entityLoaders` is a map of entity category → `{ source: <dataSourceName>, config: { … } }`. ([GitHub][6])
 
-Example (from the actual default config):
+Example (from the default config):
 
 * `areas` uses `YamlArea` with `path: "bundles/[BUNDLE]/areas"`
 * `rooms` uses `Yaml` with `path: "bundles/[BUNDLE]/areas/[AREA]/rooms.yml"`
@@ -348,10 +334,8 @@ Because `EntityLoader.setBundle()` and `setArea()` set these config fields, the 
 
 The default configuration makes a strong separation:
 
-* **World content** lives under `bundles/…` and is loaded from YAML files (or directories of YAML) via `Yaml*` datasources. ([GitHub][6])
-* **Accounts and players** live under `data/…` and are loaded from JSON directories via `JsonDirectoryDataSource`. ([GitHub][6])
-
-This isn’t just convention: the wrapper explicitly wires the accounts and players loaders into the account/player managers. ([GitHub][2])
+* **World content** (areas, rooms, NPCs, items, quests, help) is stored under `bundles/...` paths and is loaded from YAML files (or directories of YAML) via `Yaml*` datasources. ([GitHub][6]).
+* **Accounts** and **players** are stored under `data/account` and `data/player` and are loaded from JSON directories via `JsonDirectoryDataSource`. ([GitHub][6]).
 
 ---
 
@@ -493,7 +477,7 @@ To implement a new datasource compatible with this ecosystem:
 
 ### 6.1 What bundles are (in this codebase)
 
-A bundle is a directory under `ranviermud/bundles/` whose name appears in `ranvier.json:bundles`. ([GitHub][8])
+`ranviermud` includes a `bundles/` directory and a `bundles` array in `ranvier.json`. The wrapper passes the bundles path into `Ranvier.BundleManager` and calls `loadBundles()`; bundle discovery and feature loading behavior are defined in the `ranvier` dependency.
 
 Bundle loading is filesystem-driven and convention-driven:
 
@@ -512,7 +496,7 @@ Ranvire’s tooling treats bundles as **git submodules**:
 `util/init-bundles.js` is a higher-level helper that:
 
 * optionally prompts the user (unless `--yes/-y`)
-* installs a predefined list of example bundles (from the Ranvire org) by calling `npm run install-bundle …`
+* installs a predefined list of example bundles by calling `npm run install-bundle …`
 * rewrites `ranvier.json.bundles` to the list of installed bundle directory names
 * stages `ranvier.json` for commit. ([GitHub][9])
 
@@ -551,12 +535,12 @@ The default `entityLoaders` define concrete paths for world content:
 * For `YamlAreaDataSource`, each area directory must contain `manifest.yml` to be considered loadable. ([GitHub][15])
 * For directory datasources, only files with the configured extension (`.yml` or `.json`) are considered. ([GitHub][14])
 
-### 6.5 Namespacing rules (what can be stated from the code we have)
+### 6.5 Namespacing rules
 
-From the configuration and token system, two namespaces are explicit:
+From the configuration and token placeholders, two namespaces are explicit:
 
-* **bundle namespace**: the bundle directory name (the string inserted into `[BUNDLE]`) ([GitHub][6])
-* **area namespace**: the area directory name (the string inserted into `[AREA]`) ([GitHub][6])
+* **bundle namespace**: the bundle directory name (the string inserted into `[BUNDLE]`)
+* **area namespace**: the area directory name (the string inserted into `[AREA]`)
 
 Other higher-level “entity reference” strings (e.g. `startingRoom: "limbo:white"`) exist in config, but their parsing/meaning is not defined in the code shown here; treat them as engine- or bundle-interpreted identifiers rather than filesystem paths. ([GitHub][6])
 
@@ -566,17 +550,19 @@ Other higher-level “entity reference” strings (e.g. `startingRoom: "limbo:wh
 
 ### 7.1 Engine development vs game development
 
+`ranviermud` is the runnable wrapper and configuration repo. Engine behavior is provided by the external dependency `ranvier`.
+
 * **Game development** generally happens in `ranviermud` (config, bundles, content data).
 * **Engine development** happens in `core` (the `ranvier` package), consumed by `ranviermud` as a dependency. ([GitHub][1])
 
-### 7.2 `npm link` workflow (as documented and reinforced in code)
+### 7.2 `npm link` workflow
 
 The core repository’s README describes a `npm link` workflow:
 
 * run `npm install` + `npm link` in `core`
 * then in the runnable repo run `npm link ranvier` ([GitHub][21])
 
-The `ranviermud/ranvier` wrapper includes an inline comment describing essentially the same workflow to develop against a local core checkout. ([GitHub][2])
+The `ranvier` wrapper includes  an inline comment describing essentially the same workflow to develop against a local core checkout. ([GitHub][2])
 
 ### 7.3 Bundle workflows: prefer the provided submodule scripts
 
@@ -591,13 +577,15 @@ Because bundles are treated as submodules, use the included scripts:
 
 `ranviermud` includes a smoke-login script that:
 
-* starts `ranvier` as a child process
-* waits for telnet readiness output
+* starts `./ranvier` as a child process
+* waits for telnet readiness output (using a small set of regexes)
+* reads the port from `ranvier.json` (defaults to `4000` if missing)
 * opens a TCP connection to `127.0.0.1:<port>`
-* waits for a login prompt and sends a username
-* then shuts the server down. ([GitHub][22])
+* waits for a login prompt and sends the username `smokeuser`
+* waits for a follow-up prompt
+* shuts the server down with `SIGINT` (and `SIGKILL` if it does not exit in time) ([GitHub][22])
 
-This script is not the engine; it’s a consumer-level integration check that the configured bundle(s) bring up a telnet listener and accept basic interaction.
+This script is a consumer-level integration check that the configured bundles bring up a telnet listener and accept basic interaction.
 
 ---
 
@@ -618,19 +606,22 @@ This script is not the engine; it’s a consumer-level integration check that th
 
 3. **`BundleManager` loads enabled bundles** by name:
 
+   * the wrapper constructs `BundleManager` with `./bundles`
+   * `loadBundles()` is called
    * scans `bundles/`
    * loads only bundles listed in `ranvier.json.bundles`
    * loads feature scripts from conventional paths (`commands/`, `server-events/`, etc.)
    * loads areas and help
    * hydrates and registers areas into the runtime managers ([GitHub][8])
 
-4. **Server startup is “emit startup”**:
+4. **Server startup is invoked** (when not in test mode):
 
-   * wrapper calls `GameServer.startup(commander)`
+   * wrapper attaches `ServerEventManager` to `GameServer`
+   * wrapper calls `GameServer.startup(...)`
    * `GameServer` emits `startup`
    * bundles are expected to respond (via their server-events) and bring up transports ([GitHub][2])
 
-5. **The wrapper schedules ticks**:
+5. **The wrapper schedules ticks** (when not in test mode):
 
    * entity tick: `AreaManager.tickAll(GameState)` and `ItemManager.tickAll()`
    * player tick: `PlayerManager.emit('updateTick')` ([GitHub][2])
@@ -659,7 +650,6 @@ Everything else—gameplay, commands, networking, event reactions—hangs off th
 
 [1]: https://raw.githubusercontent.com/Ranvire/ranviermud/master/package.json "https://raw.githubusercontent.com/Ranvire/ranviermud/master/package.json"
 [2]: https://raw.githubusercontent.com/Ranvire/ranviermud/master/ranvier "https://raw.githubusercontent.com/Ranvire/ranviermud/master/ranvier"
-[3]: https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/install-bundle.js "https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/install-bundle.js"
 [4]: https://raw.githubusercontent.com/Ranvire/core/master/index.js "https://raw.githubusercontent.com/Ranvire/core/master/index.js"
 [5]: https://raw.githubusercontent.com/Ranvire/datasource-file/master/index.js "https://raw.githubusercontent.com/Ranvire/datasource-file/master/index.js"
 [6]: https://raw.githubusercontent.com/Ranvire/ranviermud/master/ranvier.json "https://raw.githubusercontent.com/Ranvire/ranviermud/master/ranvier.json"
@@ -679,3 +669,4 @@ Everything else—gameplay, commands, networking, event reactions—hangs off th
 [20]: https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/update-bundle-url.js "https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/update-bundle-url.js"
 [21]: https://github.com/Ranvire/core "https://github.com/Ranvire/core"
 [22]: https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/smoke-login.js "https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/smoke-login.js"
+:
