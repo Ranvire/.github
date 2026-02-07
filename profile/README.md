@@ -5,7 +5,7 @@ Ranvire is a maintenance-focused fork of the [RanvierMUD](https://github.com/Ran
 
 The purpose of this project is to keep Ranvier buildable, testable, and usable on modern platforms, especially modern versions of Node.js and npm, while preserving existing behavior and architecture as much as possible.
 
-This is a stewardship effort, not a redesign.
+This is a stewardship effort, not a redesign. 
 
 ## Goals
 
