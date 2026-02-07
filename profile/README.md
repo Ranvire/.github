@@ -3,7 +3,7 @@
 
 Ranvire is a maintenance-focused fork of the RanvierMUD engine.
 
-The goal of this project is to keep Ranvier buildable, testable, and usable on modern platforms—particularly current versions of Node.js and npm—while preserving existing behavior and architecture as closely as possible.
+The goal of this project is to keep Ranvier buildable, testable, and usable on modern platforms, particularly current versions of Node.js and npm, while preserving existing behavior and architecture as closely as possible.
 
 This is a stewardship effort, not a redesign.
 
