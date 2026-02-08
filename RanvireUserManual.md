@@ -301,7 +301,7 @@ These names are configuration keys.  The wrapper explicitly wires the `accounts`
 It exposes:
 
 * `setBundle(name)` and `setArea(name)` which set `config.bundle` and `config.area` respectively. ([GitHub][7])
-* `hasData()`, `fetchAll()`, `fetch(id)`, `replace(data)`, `update(id, data)` which delegate to the datasource if it supports the method; otherwise the loader throws a “not supported” error. ([GitHub][7])
+* `hasData()` which delegates directly to the datasource, plus `fetchAll()`, `fetch(id)`, `replace(data)`, `update(id, data)` which delegate only if the method exists; otherwise the loader throws a “not supported” error. ([GitHub][7])
 
 **Practical consequence:** the “datasource interface” is duck-typed. A datasource is usable if it provides the methods the engine attempts to call. ([GitHub][7])
 
@@ -349,7 +349,7 @@ The engine’s persistence surface is configuration-driven:
 
 * The wrapper loads a datasource registry from `ranvier.json:dataSources`. ([GitHub][2])
 * Entity categories (accounts, rooms, etc.) are then mapped to datasources + per-entity config via `ranvier.json:entityLoaders`. ([GitHub][6])
-* At runtime, code interacts with an `EntityLoader`, not directly with filesystem or YAML/JSON parsing. ([GitHub][7])
+* At runtime, most entity access goes through an `EntityLoader`, but core still performs some direct filesystem access via `Data` (e.g., account save and player existence checks). ([GitHub][7])
 
 So a datasource exists to isolate “how do I read/write entity data” from both:
 
@@ -374,11 +374,10 @@ The key function is `resolvePath(config)`:
 
 #### 5.2.2 The effective datasource interface (duck-typed)
 
-`EntityLoader` calls into the datasource and checks method existence with `'methodName' in this.dataSource`. ([GitHub][7])
+`EntityLoader` checks method existence with `'methodName' in this.dataSource` for `fetchAll`, `fetch`, `replace`, and `update`; `hasData` is called directly. ([GitHub][7])
 
-In practice, a datasource may implement:
+In practice, a datasource must implement `hasData(config)` and may implement:
 
-* `hasData(config)` → boolean/promise
 * `fetchAll(config)` → object/array/promise
 * `fetch(config, id)` → record/promise
 * `replace(config, data)` → promise (write entire dataset)
@@ -669,4 +668,3 @@ Everything else—gameplay, commands, networking, event reactions—hangs off th
 [20]: https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/update-bundle-url.js "https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/update-bundle-url.js"
 [21]: https://github.com/Ranvire/core "https://github.com/Ranvire/core"
 [22]: https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/smoke-login.js "https://raw.githubusercontent.com/Ranvire/ranviermud/master/util/smoke-login.js"
-:
